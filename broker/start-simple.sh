@@ -3,16 +3,12 @@
 # 簡單的 MQTT Broker 啟動腳本
 echo "正在啟動簡單的 MQTT Broker..."
 
-# 停止現有的容器（如果有）
-echo "停止現有容器..."
-docker-compose -f docker-compose-simple.yml down 2>/dev/null || true
-
 # 創建必要的目錄
 mkdir -p data log
 
 # 啟動新的簡單配置
 echo "啟動 MQTT Broker (簡單版本)..."
-docker-compose -f docker-compose-simple.yml up -d
+docker compose -f docker-compose-simple.yml up -d
 
 # 等待服務啟動
 echo "等待服務啟動..."
@@ -20,7 +16,7 @@ sleep 3
 
 # 檢查狀態
 echo "檢查服務狀態..."
-docker-compose -f docker-compose-simple.yml ps
+docker compose -f docker-compose-simple.yml ps
 
 echo ""
 echo "✅ MQTT Broker 已啟動！"
