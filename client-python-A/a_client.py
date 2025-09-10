@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 
 # MQTT 配置 - 可通過環境變數覆蓋
 import os
-BROKER_HOST = os.getenv("MQTT_BROKER_IP", "localhost")
-PORT = int(os.getenv("MQTT_PORT", "1883"))              # 標準 MQTT 端口
+BROKER_HOST = os.getenv("MQTT_BROKER_IP", "140.134.60.218")
+PORT = int(os.getenv("MQTT_PORT", "4883"))              # 標準 MQTT 端口
 ID = os.getenv("MQTT_CLIENT_ID", "id1")
 CLIENT_ID = f"A-{ID}"
 KEEPALIVE = int(os.getenv("MQTT_KEEPALIVE", "45"))
@@ -39,7 +39,7 @@ class MQTTClient:
         
     def setup_client(self):
         """設置 MQTT 客戶端"""
-        self.client = mqtt.Client(client_id=CLIENT_ID, clean_session=False, protocol=mqtt.MQTTv311)
+        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=CLIENT_ID, clean_session=False, protocol=mqtt.MQTTv311)
         
         # 匿名連接，不需要用戶名密碼
         

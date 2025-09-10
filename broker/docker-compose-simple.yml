@@ -6,7 +6,7 @@ services:
     container_name: mosquitto-simple
     hostname: mqtt-broker
     ports:
-      - "1883:1883"    # MQTT 標準端口
+      - "4883:1883"    # 外部端口 4883 映射到內部 1883
     volumes:
       # 簡單配置文件
       - ./mosquitto-simple.conf:/mosquitto/config/mosquitto.conf:ro
