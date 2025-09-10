@@ -3,8 +3,6 @@
 # 簡單的 MQTT Broker 啟動腳本
 echo "正在啟動簡單的 MQTT Broker..."
 
-cd /Users/rich/Documents/code/mqtt_gear_server/broker
-
 # 停止現有的容器（如果有）
 echo "停止現有容器..."
 docker-compose -f docker-compose-simple.yml down 2>/dev/null || true
