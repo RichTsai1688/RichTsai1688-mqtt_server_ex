@@ -57,7 +57,7 @@ class MQTTClient:
         self.client.on_message = self.on_message
         self.client.on_disconnect = self.on_disconnect
         
-    def on_connect(self, client: mqtt.Client, userdata, flags, rc):
+    def on_connect(self, client: mqtt.Client, userdata, flags, rc, properties=None):
         """連接成功回調"""
         if rc == 0:
             self.is_connected = True
@@ -83,7 +83,7 @@ class MQTTClient:
         else:
             logger.error(f"A 客戶端連接失敗，錯誤碼：{rc}")
             
-    def on_disconnect(self, client, userdata, rc):
+    def on_disconnect(self, client, userdata, rc, properties=None):
         """斷線回調"""
         self.is_connected = False
         logger.warning(f"A 客戶端斷線，錯誤碼：{rc}")
