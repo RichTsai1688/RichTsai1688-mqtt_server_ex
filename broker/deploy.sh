@@ -150,13 +150,24 @@ generate_passwords() {
 
 # 生成 TLS 憑證
 generate_certificates() {
-    if [ -f "certs/server.crt" ]; then
+    if [ -f "certs/server.crt" ] && [ -f "certs/ca.crt" ]; then
         print_warning "TLS 憑證已存在，跳過生成"
         return
     fi
     
     print_info "生成 TLS 自簽名憑證..."
     
+    # 使用獨立的憑證生成腳本
+    if [ -f "generate_certs.sh" ]; then
+        if ./generate_certs.sh; then
+            return
+        else
+            print_warning "獨立憑證腳本執行失敗，嘗試內建方法..."
+        fi
+    fi
+    
+    # 內建憑證生成方法
+    mkdir -p certs
     cd certs
     
     # 生成 CA 私鑰
@@ -173,35 +184,44 @@ generate_certificates() {
     openssl req -new -key server.key -out server.csr \
         -subj "/C=TW/ST=Taiwan/L=Taipei/O=MQTT-Gear-Server/CN=localhost"
     
-    # 創建擴展文件 (支持多域名)
+    # 創建擴展文件 (支持多域名和 IP)
     cat > server.ext << EOF
+[v3_ext]
 authorityKeyIdentifier=keyid,issuer
 basicConstraints=CA:FALSE
 keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
+extendedKeyUsage = serverAuth, clientAuth
 subjectAltName = @alt_names
 
 [alt_names]
 DNS.1 = localhost
 DNS.2 = mqtt-broker
 DNS.3 = *.local
+DNS.4 = mosquitto
 IP.1 = 127.0.0.1
 IP.2 = ::1
+IP.3 = ${MQTT_BROKER_IP}
+IP.4 = 0.0.0.0
 EOF
-    
+
     # 用 CA 簽署服務器憑證
-    openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key \
-        -CAcreateserial -out server.crt -days 365 -extensions v3_ext -extfile server.ext
-    
-    # 設置文件權限
-    chmod 600 server.key ca.key
-    chmod 644 server.crt ca.crt
-    
-    # 清理臨時文件
-    rm server.csr ca.key ca.srl server.ext
-    
-    cd ..
-    
-    print_success "TLS 憑證生成完成"
+    if openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key \
+        -CAcreateserial -out server.crt -days 365 -extensions v3_ext -extfile server.ext; then
+        
+        # 設置文件權限
+        chmod 600 server.key ca.key
+        chmod 644 server.crt ca.crt
+
+        # 清理臨時文件
+        rm -f server.csr ca.srl server.ext
+
+        cd ..
+        print_success "TLS 憑證生成完成"
+    else
+        print_error "憑證生成失敗"
+        cd ..
+        print_warning "TLS 功能可能無法使用，但 MQTT 基本功能仍可正常運行"
+    fi
 }
 
 # 創建監控配置
