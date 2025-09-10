@@ -5,17 +5,6 @@
 
 set -e  # 遇到錯誤立即退出
 
-# 載入環境變數
-if [ -f ".env" ]; then
-    source .env
-    print_info "已載入 .env 配置文件"
-fi
-
-# 設置默認值
-MQTT_BROKER_IP=${MQTT_BROKER_IP:-140.134.60.218}
-MQTT_PORT=${MQTT_PORT:-4883}
-MQTT_TLS_PORT=${MQTT_TLS_PORT:-4884}
-
 # 顏色定義
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -38,6 +27,29 @@ print_warning() {
 
 print_error() {
     echo -e "${RED}❌ $1${NC}"
+}
+
+# 載入環境變數
+load_environment() {
+    if [ -f ".env" ]; then
+        source .env
+        print_info "已載入 .env 配置文件"
+    else
+        print_warning ".env 文件未找到，使用預設值"
+    fi
+    
+    # 設置默認值
+    MQTT_BROKER_IP=${MQTT_BROKER_IP:-140.134.60.218}
+    MQTT_PORT=${MQTT_PORT:-4883}
+    MQTT_TLS_PORT=${MQTT_TLS_PORT:-4884}
+    MQTT_WS_PORT=${MQTT_WS_PORT:-9021}
+    MQTT_A_USER=${MQTT_A_USER:-A_user}
+    MQTT_B_USER=${MQTT_B_USER:-B_user}
+    MQTT_MONITOR_USER=${MQTT_MONITOR_USER:-monitor_user}
+    MQTT_CLIENT_ID=${MQTT_CLIENT_ID:-id1}
+    PROMETHEUS_PORT=${PROMETHEUS_PORT:-9090}
+    GRAFANA_PORT=${GRAFANA_PORT:-3000}
+    MQTT_EXPORTER_PORT=${MQTT_EXPORTER_PORT:-9234}
 }
 
 # 檢查 Docker 環境
@@ -351,6 +363,9 @@ cleanup() {
 main() {
     echo "🐳 MQTT Gear Server - Docker 部署工具"
     echo "======================================"
+    
+    # 載入環境配置
+    load_environment
     
     # 解析命令行參數
     case "${1:-dev}" in
