@@ -1,0 +1,404 @@
+#!/bin/bash
+
+# MQTT Gear Server - Docker 自動部署腳本
+# 支持開發和生產環境部署
+
+set -e  # 遇到錯誤立即退出
+
+# 顏色定義
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# 函數定義
+print_info() {
+    echo -e "${BLUE}ℹ️  $1${NC}"
+}
+
+print_success() {
+    echo -e "${GREEN}✅ $1${NC}"
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠️  $1${NC}"
+}
+
+print_error() {
+    echo -e "${RED}❌ $1${NC}"
+}
+
+# 檢查 Docker 環境
+check_docker() {
+    print_info "檢查 Docker 環境..."
+    
+    if ! command -v docker &> /dev/null; then
+        print_error "Docker 未安裝，請先安裝 Docker"
+        exit 1
+    fi
+    
+    if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
+        print_error "Docker Compose 未安裝，請先安裝 Docker Compose"
+        exit 1
+    fi
+    
+    if ! docker info &> /dev/null; then
+        print_error "Docker 服務未運行，請啟動 Docker 服務"
+        exit 1
+    fi
+    
+    print_success "Docker 環境檢查通過"
+}
+
+# 創建必要目錄
+create_directories() {
+    print_info "創建必要目錄..."
+    
+    local dirs=(
+        "data"
+        "log" 
+        "certs"
+        "backup"
+        "grafana/dashboards"
+        "grafana/datasources"
+        "prometheus"
+        "nginx"
+        "redis"
+        "scripts"
+    )
+    
+    for dir in "${dirs[@]}"; do
+        mkdir -p "$dir"
+        print_info "已創建目錄: $dir"
+    done
+    
+    # 設置權限 (Mosquitto 需要 UID 1883)
+    if command -v sudo &> /dev/null; then
+        sudo chown -R 1883:1883 data log 2>/dev/null || {
+            print_warning "無法設置目錄權限，可能需要手動執行: sudo chown -R 1883:1883 data log"
+        }
+    fi
+    
+    chmod 755 data log certs backup
+    
+    print_success "目錄創建完成"
+}
+
+# 生成密碼文件
+generate_passwords() {
+    if [ -f "passwd" ]; then
+        print_warning "密碼文件已存在，跳過生成"
+        return
+    fi
+    
+    print_info "生成 MQTT 用戶密碼文件..."
+    
+    if command -v mosquitto_passwd &> /dev/null; then
+        # 使用本地 mosquitto_passwd
+        print_info "使用本地 mosquitto_passwd 工具"
+        echo "請為 A_user 設置密碼:"
+        mosquitto_passwd -c passwd A_user
+        echo "請為 B_user 設置密碼:"
+        mosquitto_passwd passwd B_user
+        
+        # 添加監控用戶
+        echo "請為 monitor_user 設置密碼:"
+        mosquitto_passwd passwd monitor_user
+    else
+        # 使用 Docker 容器
+        print_info "使用 Docker 容器生成密碼"
+        echo "請為 A_user 設置密碼:"
+        docker run -it --rm -v "$(pwd)":/data eclipse-mosquitto:2 \
+            mosquitto_passwd -c /data/passwd A_user
+        
+        echo "請為 B_user 設置密碼:"
+        docker run -it --rm -v "$(pwd)":/data eclipse-mosquitto:2 \
+            mosquitto_passwd /data/passwd B_user
+            
+        echo "請為 monitor_user 設置密碼:"
+        docker run -it --rm -v "$(pwd)":/data eclipse-mosquitto:2 \
+            mosquitto_passwd /data/passwd monitor_user
+    fi
+    
+    chmod 644 passwd
+    print_success "密碼文件生成完成"
+}
+
+# 生成 TLS 憑證
+generate_certificates() {
+    if [ -f "certs/server.crt" ]; then
+        print_warning "TLS 憑證已存在，跳過生成"
+        return
+    fi
+    
+    print_info "生成 TLS 自簽名憑證..."
+    
+    cd certs
+    
+    # 生成 CA 私鑰
+    openssl genrsa -out ca.key 4096
+    
+    # 生成 CA 根憑證
+    openssl req -new -x509 -key ca.key -out ca.crt -days 365 \
+        -subj "/C=TW/ST=Taiwan/L=Taipei/O=MQTT-Gear-Server/CN=MQTT-CA"
+    
+    # 生成服務器私鑰
+    openssl genrsa -out server.key 4096
+    
+    # 生成服務器憑證請求
+    openssl req -new -key server.key -out server.csr \
+        -subj "/C=TW/ST=Taiwan/L=Taipei/O=MQTT-Gear-Server/CN=localhost"
+    
+    # 創建擴展文件 (支持多域名)
+    cat > server.ext << EOF
+authorityKeyIdentifier=keyid,issuer
+basicConstraints=CA:FALSE
+keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = localhost
+DNS.2 = mqtt-broker
+DNS.3 = *.local
+IP.1 = 127.0.0.1
+IP.2 = ::1
+EOF
+    
+    # 用 CA 簽署服務器憑證
+    openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key \
+        -CAcreateserial -out server.crt -days 365 -extensions v3_ext -extfile server.ext
+    
+    # 設置文件權限
+    chmod 600 server.key ca.key
+    chmod 644 server.crt ca.crt
+    
+    # 清理臨時文件
+    rm server.csr ca.key ca.srl server.ext
+    
+    cd ..
+    
+    print_success "TLS 憑證生成完成"
+}
+
+# 創建監控配置
+create_monitoring_configs() {
+    print_info "創建監控配置文件..."
+    
+    # Prometheus 配置
+    cat > prometheus/prometheus.yml << 'EOF'
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'mqtt-exporter'
+    static_configs:
+      - targets: ['mqtt-exporter:9234']
+    scrape_interval: 30s
+    
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+      
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+EOF
+
+    # Grafana 數據源配置
+    mkdir -p grafana/datasources
+    cat > grafana/datasources/prometheus.yml << 'EOF'
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+EOF
+
+    # Redis 配置
+    cat > redis/redis.conf << 'EOF'
+bind 0.0.0.0
+port 6379
+timeout 300
+keepalive 60
+maxmemory 256mb
+maxmemory-policy allkeys-lru
+save 900 1
+save 300 10
+save 60 10000
+EOF
+
+    print_success "監控配置創建完成"
+}
+
+# 創建備份腳本
+create_backup_script() {
+    print_info "創建備份腳本..."
+    
+    cat > scripts/backup.sh << 'EOF'
+#!/bin/ash
+
+# MQTT 數據備份腳本
+
+BACKUP_DIR="/backup"
+DATE=$(date +%Y%m%d_%H%M%S)
+BACKUP_NAME="mqtt_backup_${DATE}.tar.gz"
+
+echo "開始備份 MQTT 數據..."
+
+# 創建備份
+tar -czf "${BACKUP_DIR}/${BACKUP_NAME}" \
+    -C /source data logs
+
+# 保留最近 7 天的備份
+find "${BACKUP_DIR}" -name "mqtt_backup_*.tar.gz" -mtime +7 -delete
+
+echo "備份完成: ${BACKUP_NAME}"
+
+# 添加到 crontab (每天凌晨 2 點執行)
+# 0 2 * * * /backup.sh >> /var/log/backup.log 2>&1
+EOF
+
+    chmod +x scripts/backup.sh
+    print_success "備份腳本創建完成"
+}
+
+# 部署函數
+deploy_development() {
+    print_info "部署開發環境..."
+    
+    docker-compose up -d
+    
+    print_success "開發環境部署完成"
+    print_info "MQTT Broker: localhost:1883 (非加密)"
+    print_info "MQTT TLS: localhost:8883 (加密)" 
+    print_info "WebSocket: localhost:9001"
+}
+
+deploy_production() {
+    print_info "部署生產環境..."
+    
+    create_monitoring_configs
+    create_backup_script
+    
+    docker-compose -f docker-compose.prod.yml up -d
+    
+    print_success "生產環境部署完成"
+    print_info "MQTT Broker: localhost:1883 (非加密)"
+    print_info "MQTT TLS: localhost:8883 (加密)"
+    print_info "WebSocket: localhost:9001"
+    print_info "Grafana: http://localhost:3000 (admin/admin123)"
+    print_info "Prometheus: http://localhost:9090"
+    print_info "MQTT Metrics: http://localhost:9234/metrics"
+}
+
+# 顯示狀態
+show_status() {
+    print_info "檢查服務狀態..."
+    
+    if [ "$1" = "prod" ]; then
+        docker-compose -f docker-compose.prod.yml ps
+    else
+        docker-compose ps
+    fi
+    
+    echo ""
+    print_info "健康檢查:"
+    
+    # 測試 MQTT 連接
+    if command -v mosquitto_pub &> /dev/null; then
+        if mosquitto_pub -h localhost -p 1883 -t test/deploy -m "deployment_test" -u A_user -P "$(read -sp 'A_user密碼: ' pwd; echo $pwd)" 2>/dev/null; then
+            print_success "MQTT 連接正常"
+        else
+            print_warning "MQTT 連接測試失敗"
+        fi
+    fi
+}
+
+# 清理函數
+cleanup() {
+    print_warning "清理 Docker 資源..."
+    
+    if [ "$1" = "prod" ]; then
+        docker-compose -f docker-compose.prod.yml down -v
+    else
+        docker-compose down -v
+    fi
+    
+    # 清理未使用的 Docker 資源
+    docker system prune -f
+    
+    print_success "清理完成"
+}
+
+# 主函數
+main() {
+    echo "🐳 MQTT Gear Server - Docker 部署工具"
+    echo "======================================"
+    
+    # 解析命令行參數
+    case "${1:-dev}" in
+        "dev"|"development")
+            ENV="dev"
+            ;;
+        "prod"|"production")
+            ENV="prod"
+            ;;
+        "status")
+            show_status "${2:-dev}"
+            exit 0
+            ;;
+        "cleanup"|"clean")
+            cleanup "${2:-dev}"
+            exit 0
+            ;;
+        "help"|"-h"|"--help")
+            echo "用法: $0 [dev|prod|status|cleanup|help]"
+            echo ""
+            echo "選項:"
+            echo "  dev         部署開發環境 (默認)"
+            echo "  prod        部署生產環境 (包含監控)"
+            echo "  status      顯示服務狀態"
+            echo "  cleanup     清理 Docker 資源"
+            echo "  help        顯示此幫助信息"
+            exit 0
+            ;;
+        *)
+            print_error "未知選項: $1"
+            echo "使用 '$0 help' 查看幫助"
+            exit 1
+            ;;
+    esac
+    
+    # 執行部署流程
+    check_docker
+    create_directories
+    generate_passwords
+    generate_certificates
+    
+    if [ "$ENV" = "prod" ]; then
+        deploy_production
+    else
+        deploy_development
+    fi
+    
+    echo ""
+    show_status "$ENV"
+    
+    echo ""
+    print_success "🎉 部署完成!"
+    
+    if [ "$ENV" = "prod" ]; then
+        print_info "生產環境已啟動，請查看監控面板確認服務狀態"
+    else
+        print_info "開發環境已啟動，可以開始測試 MQTT 連接"
+    fi
+}
+
+# 執行主函數
+main "$@"

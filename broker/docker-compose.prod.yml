@@ -1,0 +1,193 @@
+version: '3.8'
+
+# MQTT Gear Server - 生產環境配置
+# 包含監控、備份、高可用等功能
+
+services:
+  # 主 MQTT Broker
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto-prod
+    hostname: mqtt-broker-prod
+    ports:
+      - "1883:1883"    # MQTT
+      - "8883:8883"    # MQTT over TLS
+      - "9001:9001"    # WebSocket
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./acl:/mosquitto/config/acl:ro
+      - ./passwd:/mosquitto/config/passwd:ro
+      - ./certs:/mosquitto/certs:ro
+      - mqtt_data:/mosquitto/data
+      - mqtt_logs:/mosquitto/log
+    environment:
+      - TZ=Asia/Taipei
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_pub -h localhost -t '$SYS/broker/ping' -m 'ping' -q || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file" 
+      options:
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          memory: 256M
+    networks:
+      - mqtt-prod-network
+    depends_on:
+      - mqtt-exporter
+
+  # MQTT 指標導出器 (Prometheus 監控)
+  mqtt-exporter:
+    image: sapcc/mosquitto-exporter:latest
+    container_name: mqtt-exporter
+    ports:
+      - "9234:9234"    # Prometheus metrics
+    environment:
+      - BROKER_ENDPOINT=tcp://mosquitto:1883
+      - MQTT_USER=monitor_user
+      - MQTT_PASSWORD=monitor_password  # 請修改為實際密碼
+      - MQTT_TIMEOUT=30s
+      - LOG_LEVEL=info
+    restart: unless-stopped
+    networks:
+      - mqtt-prod-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9234/metrics || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Grafana 監控面板
+  grafana:
+    image: grafana/grafana:latest
+    container_name: mqtt-grafana
+    ports:
+      - "3000:3000"    # Grafana web UI
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123  # 請修改為安全密碼
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+    restart: unless-stopped
+    networks:
+      - mqtt-prod-network
+    depends_on:
+      - prometheus
+
+  # Prometheus 監控系統
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: mqtt-prometheus
+    ports:
+      - "9090:9090"    # Prometheus web UI
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    networks:
+      - mqtt-prod-network
+
+  # Redis (用於會話存儲和快取)
+  redis:
+    image: redis:7-alpine
+    container_name: mqtt-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    networks:
+      - mqtt-prod-network
+
+  # Nginx 反向代理 (負載均衡)
+  nginx:
+    image: nginx:alpine
+    container_name: mqtt-nginx
+    ports:
+      - "80:80"       # HTTP
+      - "443:443"     # HTTPS
+      - "1884:1884"   # MQTT 負載均衡端口
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    networks:
+      - mqtt-prod-network
+
+  # 數據備份服務
+  backup:
+    image: alpine:latest
+    container_name: mqtt-backup
+    volumes:
+      - mqtt_data:/source/data:ro
+      - mqtt_logs:/source/logs:ro
+      - ./backup:/backup
+      - ./scripts/backup.sh:/backup.sh:ro
+    command: crond -f
+    environment:
+      - TZ=Asia/Taipei
+    restart: unless-stopped
+    networks:
+      - mqtt-prod-network
+
+# 持久化數據卷
+volumes:
+  mqtt_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data
+  mqtt_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind  
+      device: ${PWD}/log
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  redis_data:
+    driver: local
+  nginx_logs:
+    driver: local
+
+# 網絡配置
+networks:
+  mqtt-prod-network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.21.0.0/16
+          gateway: 172.21.0.1

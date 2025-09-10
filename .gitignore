@@ -1,0 +1,63 @@
+# MQTT Gear Server .gitignore
+
+# MQTT Broker 數據和日誌
+broker/data/
+broker/log/
+broker/passwd
+
+# TLS 憑證 (安全考量)
+broker/certs/*.crt
+broker/certs/*.key
+broker/certs/*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+
+# C# / .NET
+bin/
+obj/
+*.user
+*.userosscache
+*.sln.docstates
+.vs/
+*.dll
+*.exe
+*.pdb
+
+# 結果文件
+client-python-A/batch_results_*.json
+client-python-A/*.log
+*.log
+
+# IDE 和編輯器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# 臨時文件
+*.tmp
+*.temp
+*.bak
+*.backup
