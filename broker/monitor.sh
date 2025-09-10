@@ -5,6 +5,20 @@
 
 set -e
 
+# 載入環境變數
+if [ -f ".env" ]; then
+    source .env
+fi
+
+# 設置默認值
+MQTT_BROKER_IP=${MQTT_BROKER_IP:-140.134.60.218}
+MQTT_PORT=${MQTT_PORT:-4883}
+MQTT_TLS_PORT=${MQTT_TLS_PORT:-4884}
+MQTT_WS_PORT=${MQTT_WS_PORT:-9021}
+GRAFANA_PORT=${GRAFANA_PORT:-3000}
+PROMETHEUS_PORT=${PROMETHEUS_PORT:-9090}
+MQTT_METRICS_PORT=${MQTT_METRICS_PORT:-9234}
+
 # 顏色定義
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -94,7 +108,14 @@ check_resources() {
 check_ports() {
     print_section "🌐 端口狀態"
     
-    local ports=("1883:MQTT" "8883:MQTT TLS" "9001:WebSocket" "3000:Grafana" "9090:Prometheus" "9234:MQTT Metrics")
+    local ports=(
+        "${MQTT_PORT}:MQTT" 
+        "${MQTT_TLS_PORT}:MQTT TLS" 
+        "${MQTT_WS_PORT}:WebSocket" 
+        "${GRAFANA_PORT}:Grafana" 
+        "${PROMETHEUS_PORT}:Prometheus" 
+        "${MQTT_METRICS_PORT}:MQTT Metrics"
+    )
     
     for port_info in "${ports[@]}"; do
         IFS=":" read -r port service <<< "$port_info"
@@ -120,18 +141,18 @@ test_mqtt_connection() {
     fi
     
     # 測試匿名連接 (如果允許)
-    if timeout 5 mosquitto_pub -h localhost -p 1883 -t test/monitor -m "test" -q 2>/dev/null; then
-        echo -e "  ${GREEN}✅ 匿名連接 (1883)${NC}"
+    if timeout 5 mosquitto_pub -h ${MQTT_BROKER_IP} -p ${MQTT_PORT} -t test/monitor -m "test" -q 2>/dev/null; then
+        echo -e "  ${GREEN}✅ 匿名連接 (${MQTT_PORT})${NC}"
     else
-        echo -e "  ${RED}❌ 匿名連接被拒絕 (1883) - 正常，需要認證${NC}"
+        echo -e "  ${RED}❌ 匿名連接被拒絕 (${MQTT_PORT}) - 正常，需要認證${NC}"
     fi
     
     # 測試 TLS 連接
     if [ -f "certs/ca.crt" ]; then
-        if timeout 5 mosquitto_pub -h localhost -p 8883 --cafile certs/ca.crt -t test/tls -m "tls_test" -q 2>/dev/null; then
-            echo -e "  ${GREEN}✅ TLS 連接 (8883)${NC}"
+        if timeout 5 mosquitto_pub -h ${MQTT_BROKER_IP} -p ${MQTT_TLS_PORT} --cafile certs/ca.crt -t test/tls -m "tls_test" -q 2>/dev/null; then
+            echo -e "  ${GREEN}✅ TLS 連接 (${MQTT_TLS_PORT})${NC}"
         else
-            echo -e "  ${RED}❌ TLS 連接失敗 (8883) - 需要認證${NC}"
+            echo -e "  ${RED}❌ TLS 連接失敗 (${MQTT_TLS_PORT}) - 需要認證${NC}"
         fi
     else
         echo -e "  ${YELLOW}⚠️  TLS 憑證不存在，跳過 TLS 測試${NC}"
@@ -234,7 +255,7 @@ show_commands() {
     echo "監控和調試:"
     echo "  docker-compose logs -f mosquitto        # 查看實時日誌"
     echo "  docker exec -it mosquitto-mqtt-broker sh   # 進入容器"
-    echo "  mosquitto_sub -h localhost -p 1883 -t '#' -v   # 監聽所有消息"
+    echo "  mosquitto_sub -h ${MQTT_BROKER_IP} -p ${MQTT_PORT} -t '#' -v   # 監聽所有消息"
     echo ""
     echo "管理命令:"
     echo "  ./deploy.sh dev                         # 部署開發環境"

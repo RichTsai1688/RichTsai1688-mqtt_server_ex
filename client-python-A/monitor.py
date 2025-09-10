@@ -10,12 +10,13 @@ import argparse
 from datetime import datetime
 import paho.mqtt.client as mqtt
 
-# MQTT 配置
-BROKER_HOST = "127.0.0.1"
-PORT = 1883
+# MQTT 配置 - 可通過環境變數覆蓋
+import os
+BROKER_HOST = os.getenv("MQTT_BROKER_IP", "140.134.60.218")
+PORT = int(os.getenv("MQTT_PORT", "4883"))
 CLIENT_ID = "monitor"
-USER = "A_user"  # 使用 A_user 權限監控
-PASS = "A_password"
+USER = os.getenv("MQTT_A_USER", "A_user")  # 使用 A_user 權限監控
+PASS = os.getenv("MQTT_A_PASSWORD", "A_password")
 
 # Topic 定義
 ID = "id1"

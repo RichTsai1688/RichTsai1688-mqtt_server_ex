@@ -6,11 +6,13 @@ using MQTTnet.Formatter;
 
 class Program
 {
-    static string Host = "127.0.0.1";
-    static int Port = 1883;  // TLS 改 8883 並設定 TLS 選項
-    static string Id = "id1";
-    static string User = "B_user";
-    static string Pass = "B_password";
+    // MQTT 配置 - 可通過環境變數覆蓋
+    static string Host = Environment.GetEnvironmentVariable("MQTT_BROKER_IP") ?? "140.134.60.218";
+    static int Port = int.Parse(Environment.GetEnvironmentVariable("MQTT_PORT") ?? "4883");  // TLS 改成 MQTT_TLS_PORT
+    static int TlsPort = int.Parse(Environment.GetEnvironmentVariable("MQTT_TLS_PORT") ?? "4884");
+    static string Id = Environment.GetEnvironmentVariable("MQTT_CLIENT_ID") ?? "id1";
+    static string User = Environment.GetEnvironmentVariable("MQTT_B_USER") ?? "B_user";
+    static string Pass = Environment.GetEnvironmentVariable("MQTT_B_PASSWORD") ?? "B_password";
 
     static string TOP_CTRL_START = $"v1/{Id}/ctrl/start";
     static string TOP_CTRL_END   = $"v1/{Id}/ctrl/end";

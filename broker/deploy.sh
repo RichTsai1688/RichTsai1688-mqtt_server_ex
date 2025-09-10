@@ -5,6 +5,17 @@
 
 set -e  # 遇到錯誤立即退出
 
+# 載入環境變數
+if [ -f ".env" ]; then
+    source .env
+    print_info "已載入 .env 配置文件"
+fi
+
+# 設置默認值
+MQTT_BROKER_IP=${MQTT_BROKER_IP:-140.134.60.218}
+MQTT_PORT=${MQTT_PORT:-4883}
+MQTT_TLS_PORT=${MQTT_TLS_PORT:-4884}
+
 # 顏色定義
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -275,9 +286,9 @@ deploy_development() {
     docker-compose up -d
     
     print_success "開發環境部署完成"
-    print_info "MQTT Broker: localhost:1883 (非加密)"
-    print_info "MQTT TLS: localhost:8883 (加密)" 
-    print_info "WebSocket: localhost:9001"
+    print_info "MQTT Broker: ${MQTT_BROKER_IP}:${MQTT_PORT} (非加密)"
+    print_info "MQTT TLS: ${MQTT_BROKER_IP}:${MQTT_TLS_PORT} (加密)" 
+    print_info "WebSocket: ${MQTT_BROKER_IP}:${MQTT_WS_PORT:-9021}"
 }
 
 deploy_production() {
@@ -289,12 +300,12 @@ deploy_production() {
     docker-compose -f docker-compose.prod.yml up -d
     
     print_success "生產環境部署完成"
-    print_info "MQTT Broker: localhost:1883 (非加密)"
-    print_info "MQTT TLS: localhost:8883 (加密)"
-    print_info "WebSocket: localhost:9001"
-    print_info "Grafana: http://localhost:3000 (admin/admin123)"
-    print_info "Prometheus: http://localhost:9090"
-    print_info "MQTT Metrics: http://localhost:9234/metrics"
+    print_info "MQTT Broker: ${MQTT_BROKER_IP}:${MQTT_PORT} (非加密)"
+    print_info "MQTT TLS: ${MQTT_BROKER_IP}:${MQTT_TLS_PORT} (加密)"
+    print_info "WebSocket: ${MQTT_BROKER_IP}:${MQTT_WS_PORT:-9021}"
+    print_info "Grafana: http://${MQTT_BROKER_IP}:${GRAFANA_PORT:-3000} (admin/${GRAFANA_ADMIN_PASSWORD:-admin123})"
+    print_info "Prometheus: http://${MQTT_BROKER_IP}:${PROMETHEUS_PORT:-9090}"
+    print_info "MQTT Metrics: http://${MQTT_BROKER_IP}:${MQTT_METRICS_PORT:-9234}/metrics"
 }
 
 # 顯示狀態
@@ -312,10 +323,10 @@ show_status() {
     
     # 測試 MQTT 連接
     if command -v mosquitto_pub &> /dev/null; then
-        if mosquitto_pub -h localhost -p 1883 -t test/deploy -m "deployment_test" -u A_user -P "$(read -sp 'A_user密碼: ' pwd; echo $pwd)" 2>/dev/null; then
-            print_success "MQTT 連接正常"
+        if mosquitto_pub -h ${MQTT_BROKER_IP} -p ${MQTT_PORT} -t test/deploy -m "deployment_test" -u A_user -P "$(read -sp 'A_user密碼: ' pwd; echo $pwd)" 2>/dev/null; then
+            print_success "MQTT 連接正常 (${MQTT_BROKER_IP}:${MQTT_PORT})"
         else
-            print_warning "MQTT 連接測試失敗"
+            print_warning "MQTT 連接測試失敗 (${MQTT_BROKER_IP}:${MQTT_PORT})"
         fi
     fi
 }

@@ -10,9 +10,9 @@ services:
     container_name: mosquitto-prod
     hostname: mqtt-broker-prod
     ports:
-      - "1883:1883"    # MQTT
-      - "8883:8883"    # MQTT over TLS
-      - "9001:9001"    # WebSocket
+      - "${MQTT_PORT:-4883}:${MQTT_INTERNAL_PORT:-1883}"    # MQTT
+      - "${MQTT_TLS_PORT:-4884}:${MQTT_TLS_INTERNAL_PORT:-8883}"    # MQTT over TLS
+      - "${MQTT_WS_PORT:-9021}:${MQTT_WS_INTERNAL_PORT:-9001}"    # WebSocket
     volumes:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./acl:/mosquitto/config/acl:ro
@@ -21,7 +21,8 @@ services:
       - mqtt_data:/mosquitto/data
       - mqtt_logs:/mosquitto/log
     environment:
-      - TZ=Asia/Taipei
+      - TZ=${TIMEZONE:-Asia/Taipei}
+      - MQTT_BROKER_IP=${MQTT_BROKER_IP:-140.134.60.218}
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "mosquitto_pub -h localhost -t '$SYS/broker/ping' -m 'ping' -q || exit 1"]
@@ -51,10 +52,10 @@ services:
     image: sapcc/mosquitto-exporter:latest
     container_name: mqtt-exporter
     ports:
-      - "9234:9234"    # Prometheus metrics
+      - "${MQTT_METRICS_PORT:-9234}:9234"    # Prometheus metrics
     environment:
-      - BROKER_ENDPOINT=tcp://mosquitto:1883
-      - MQTT_USER=monitor_user
+      - BROKER_ENDPOINT=tcp://mosquitto:${MQTT_INTERNAL_PORT:-1883}
+      - MQTT_USER=${MQTT_MONITOR_USER:-monitor_user}
       - MQTT_PASSWORD=monitor_password  # 請修改為實際密碼
       - MQTT_TIMEOUT=30s
       - LOG_LEVEL=info
@@ -72,9 +73,9 @@ services:
     image: grafana/grafana:latest
     container_name: mqtt-grafana
     ports:
-      - "3000:3000"    # Grafana web UI
+      - "${GRAFANA_PORT:-3000}:3000"    # Grafana web UI
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin123  # 請修改為安全密碼
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin123}  # 請修改為安全密碼
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana_data:/var/lib/grafana
@@ -91,7 +92,7 @@ services:
     image: prom/prometheus:latest
     container_name: mqtt-prometheus
     ports:
-      - "9090:9090"    # Prometheus web UI
+      - "${PROMETHEUS_PORT:-9090}:9090"    # Prometheus web UI
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -111,7 +112,7 @@ services:
     image: redis:7-alpine
     container_name: mqtt-redis
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
       - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro

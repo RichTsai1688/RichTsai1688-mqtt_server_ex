@@ -13,14 +13,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# MQTT 配置
-BROKER_HOST = "127.0.0.1"
-PORT = 1883              # 若用 TLS 改 8883 並 client.tls_set()
-ID = "id1"
+# MQTT 配置 - 可通過環境變數覆蓋
+import os
+BROKER_HOST = os.getenv("MQTT_BROKER_IP", "140.134.60.218")
+PORT = int(os.getenv("MQTT_PORT", "4883"))              # 若用 TLS 改成 MQTT_TLS_PORT
+TLS_PORT = int(os.getenv("MQTT_TLS_PORT", "4884"))      # TLS 加密端口
+ID = os.getenv("MQTT_CLIENT_ID", "id1")
 CLIENT_ID = f"A-{ID}"
-USER = "A_user"
-PASS = "A_password"
-KEEPALIVE = 45
+USER = os.getenv("MQTT_A_USER", "A_user")
+PASS = os.getenv("MQTT_A_PASSWORD", "A_password")
+KEEPALIVE = int(os.getenv("MQTT_KEEPALIVE", "45"))
 
 # Topic 定義
 TOP_CTRL_START = f"v1/{ID}/ctrl/start"       # B→A
