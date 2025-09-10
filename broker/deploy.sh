@@ -52,6 +52,17 @@ load_environment() {
     MQTT_EXPORTER_PORT=${MQTT_EXPORTER_PORT:-9234}
 }
 
+# 檢測可用的 Docker Compose 命令
+get_docker_compose_cmd() {
+    if command -v docker-compose &> /dev/null; then
+        echo "docker-compose"
+    elif docker compose version &> /dev/null 2>&1; then
+        echo "docker compose"
+    else
+        return 1
+    fi
+}
+
 # 檢查 Docker 環境
 check_docker() {
     print_info "檢查 Docker 環境..."
@@ -61,17 +72,20 @@ check_docker() {
         exit 1
     fi
     
-    if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
-        print_error "Docker Compose 未安裝，請先安裝 Docker Compose"
+    # 檢測 Docker Compose 命令並設為全域變數
+    if ! DOCKER_COMPOSE_CMD=$(get_docker_compose_cmd); then
+        print_error "Docker Compose 未安裝或不可用"
+        print_info "請安裝 Docker Compose 或確保使用 Docker Desktop"
         exit 1
     fi
+    export DOCKER_COMPOSE_CMD
     
     if ! docker info &> /dev/null; then
         print_error "Docker 服務未運行，請啟動 Docker 服務"
         exit 1
     fi
     
-    print_success "Docker 環境檢查通過"
+    print_success "Docker 環境檢查通過 (使用: $DOCKER_COMPOSE_CMD)"
 }
 
 # 創建必要目錄
@@ -315,7 +329,7 @@ EOF
 deploy_development() {
     print_info "部署開發環境..."
     
-    docker-compose up -d
+    $DOCKER_COMPOSE_CMD up -d
     
     print_success "開發環境部署完成"
     print_info "MQTT Broker: ${MQTT_BROKER_IP}:${MQTT_PORT} (非加密)"
@@ -329,7 +343,7 @@ deploy_production() {
     create_monitoring_configs
     create_backup_script
     
-    docker-compose -f docker-compose.prod.yml up -d
+    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml up -d
     
     print_success "生產環境部署完成"
     print_info "MQTT Broker: ${MQTT_BROKER_IP}:${MQTT_PORT} (非加密)"
@@ -345,9 +359,9 @@ show_status() {
     print_info "檢查服務狀態..."
     
     if [ "$1" = "prod" ]; then
-        docker-compose -f docker-compose.prod.yml ps
+        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml ps
     else
-        docker-compose ps
+        $DOCKER_COMPOSE_CMD ps
     fi
     
     echo ""
@@ -368,9 +382,9 @@ cleanup() {
     print_warning "清理 Docker 資源..."
     
     if [ "$1" = "prod" ]; then
-        docker-compose -f docker-compose.prod.yml down -v
+        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml down -v
     else
-        docker-compose down -v
+        $DOCKER_COMPOSE_CMD down -v
     fi
     
     # 清理未使用的 Docker 資源
@@ -396,10 +410,14 @@ main() {
             ENV="prod"
             ;;
         "status")
+            load_environment
+            check_docker
             show_status "${2:-dev}"
             exit 0
             ;;
         "cleanup"|"clean")
+            load_environment
+            check_docker
             cleanup "${2:-dev}"
             exit 0
             ;;
