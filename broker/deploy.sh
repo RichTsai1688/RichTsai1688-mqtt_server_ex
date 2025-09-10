@@ -88,6 +88,33 @@ check_docker() {
     print_success "Docker 環境檢查通過 (使用: $DOCKER_COMPOSE_CMD)"
 }
 
+# 清理網路衝突
+cleanup_network_conflicts() {
+    print_info "檢查並清理網路衝突..."
+    
+    # 獲取專案名稱
+    local project_name=$(basename "$(pwd)")
+    
+    # 清理可能衝突的網路
+    local networks_to_check=(
+        "${project_name}_mqtt-network"
+        "broker_mqtt-network"
+        "mqtt-gear-server_mqtt-network"
+    )
+    
+    for network in "${networks_to_check[@]}"; do
+        if docker network ls | grep -q "$network"; then
+            print_warning "發現衝突網路: $network，正在清理..."
+            docker network rm "$network" 2>/dev/null || true
+        fi
+    done
+    
+    # 清理未使用的網路
+    docker network prune -f >/dev/null 2>&1 || true
+    
+    print_info "網路清理完成"
+}
+
 # 創建必要目錄
 create_directories() {
     print_info "創建必要目錄..."
@@ -96,28 +123,17 @@ create_directories() {
         "data"
         "log" 
         "certs"
-        "backup"
-        "grafana/dashboards"
-        "grafana/datasources"
-        "prometheus"
-        "nginx"
-        "redis"
         "scripts"
+        "backup"
+        "monitoring/prometheus"
+        "monitoring/grafana"
+        "nginx/ssl"
     )
     
     for dir in "${dirs[@]}"; do
         mkdir -p "$dir"
-        print_info "已創建目錄: $dir"
+        print_info "  創建目錄: $dir"
     done
-    
-    # 設置權限 (Mosquitto 需要 UID 1883)
-    if command -v sudo &> /dev/null; then
-        sudo chown -R 1883:1883 data log 2>/dev/null || {
-            print_warning "無法設置目錄權限，可能需要手動執行: sudo chown -R 1883:1883 data log"
-        }
-    fi
-    
-    chmod 755 data log certs backup
     
     print_success "目錄創建完成"
 }
@@ -329,7 +345,20 @@ EOF
 deploy_development() {
     print_info "部署開發環境..."
     
-    $DOCKER_COMPOSE_CMD up -d
+    # 嘗試啟動服務，如果失敗則清理並重試
+    if ! $DOCKER_COMPOSE_CMD up -d; then
+        print_warning "首次部署失敗，清理衝突資源後重試..."
+        $DOCKER_COMPOSE_CMD down --remove-orphans 2>/dev/null || true
+        cleanup_network_conflicts
+        sleep 2
+        
+        print_info "重試部署..."
+        if ! $DOCKER_COMPOSE_CMD up -d; then
+            print_error "部署失敗，請檢查 Docker 日誌"
+            print_info "可以嘗試: docker compose logs"
+            exit 1
+        fi
+    fi
     
     print_success "開發環境部署完成"
     print_info "MQTT Broker: ${MQTT_BROKER_IP}:${MQTT_PORT} (非加密)"
@@ -343,7 +372,20 @@ deploy_production() {
     create_monitoring_configs
     create_backup_script
     
-    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml up -d
+    # 嘗試啟動服務，如果失敗則清理並重試
+    if ! $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml up -d; then
+        print_warning "首次部署失敗，清理衝突資源後重試..."
+        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml down --remove-orphans 2>/dev/null || true
+        cleanup_network_conflicts
+        sleep 2
+        
+        print_info "重試部署..."
+        if ! $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml up -d; then
+            print_error "生產環境部署失敗，請檢查 Docker 日誌"
+            print_info "可以嘗試: docker compose -f docker-compose.prod.yml logs"
+            exit 1
+        fi
+    fi
     
     print_success "生產環境部署完成"
     print_info "MQTT Broker: ${MQTT_BROKER_IP}:${MQTT_PORT} (非加密)"
@@ -441,6 +483,7 @@ main() {
     
     # 執行部署流程
     check_docker
+    cleanup_network_conflicts
     create_directories
     generate_passwords
     generate_certificates
