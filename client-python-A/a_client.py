@@ -15,13 +15,10 @@ logger = logging.getLogger(__name__)
 
 # MQTT 配置 - 可通過環境變數覆蓋
 import os
-BROKER_HOST = os.getenv("MQTT_BROKER_IP", "140.134.60.218")
-PORT = int(os.getenv("MQTT_PORT", "4883"))              # 若用 TLS 改成 MQTT_TLS_PORT
-TLS_PORT = int(os.getenv("MQTT_TLS_PORT", "4884"))      # TLS 加密端口
+BROKER_HOST = os.getenv("MQTT_BROKER_IP", "localhost")
+PORT = int(os.getenv("MQTT_PORT", "1883"))              # 標準 MQTT 端口
 ID = os.getenv("MQTT_CLIENT_ID", "id1")
 CLIENT_ID = f"A-{ID}"
-USER = os.getenv("MQTT_A_USER", "A_user")
-PASS = os.getenv("MQTT_A_PASSWORD", "A_password")
 KEEPALIVE = int(os.getenv("MQTT_KEEPALIVE", "45"))
 
 # Topic 定義
@@ -44,10 +41,7 @@ class MQTTClient:
         """設置 MQTT 客戶端"""
         self.client = mqtt.Client(client_id=CLIENT_ID, clean_session=False, protocol=mqtt.MQTTv311)
         
-        # 若用 TLS：
-        # self.client.tls_set(ca_certs="broker/certs/ca.crt")
-        
-        self.client.username_pw_set(USER, PASS)
+        # 匿名連接，不需要用戶名密碼
         
         # 設置遺囑
         will_payload = json.dumps({
